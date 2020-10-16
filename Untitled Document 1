@@ -1,0 +1,113 @@
+strash_check = false;
+  SatSolver solver;
+  solver.initialize();
+  genProofModel(solver);
+  for (int i = 0, n = _fecGrpList.size(); i < n; ++i) {
+    vector<CirGate*>* fecGrp = _fecGrpList[i];
+    for (int j = 0, s =fecGrp->size(); j < s; ++j) {
+      for (int k = j+1; k < s; ++k) {
+        if (fecGrp->at(j)->getFecInv() == fecGrp->at(k)->getFecInv())
+          cout << "Proving(" << fecGrp->at(j)->getVar() << ", " << fecGrp->at(k)->getVar() << ")..." << "\r";
+        else
+          cout << "Proving(" << fecGrp->at(j)->getVar() << ", !" << fecGrp->at(k)->getVar() << ")..." << "\r";
+        Var newV = solver.newVar(); bool result;
+        solver.addXorCNF(newV, fecGrp->at(j)->getSatVar(), fecGrp->at(j)->getFecInv(), fecGrp->at(k)->getSatVar(), fecGrp->at(k)->getFecInv());
+        solver.assumeRelease();
+        solver.assumeProperty(newV, true);
+        result = solver.assumpSolve();
+        if (!result) {  // equivalent
+          // merge
+          // fanout
+          vector<CirGateV> out = fecGrp->at(k)->output(); CirGate* g = fecGrp->at(k);
+          for (int u = 0, v = out.size(); u < v; ++u) {
+            if (out[u].gate()->fanin0_gate() == g) {
+              if (!out[u].isInv()){
+                if (fecGrp->at(j)->getFecInv() == g->getFecInv()){ 
+                  CirGateV temp(fecGrp->at(j), 0);
+                  out[u].gate()->setFanin0(temp);
+                }
+                else{
+                  CirGateV temp(fecGrp->at(j), 1);
+                  out[u].gate()->setFanin0(temp);
+                }
+              }
+              else {
+                if (fecGrp->at(j)->getFecInv() == g->getFecInv()) {
+                  CirGateV temp(fecGrp->at(j), 1);
+                  out[u].gate()->setFanin0(temp);
+                }
+                else{
+                  CirGateV temp(fecGrp->at(j), 0);
+                  out[j].gate()->setFanin0(temp);
+                }
+              }
+              
+            }
+            else {
+              if (!out[u].isInv()){
+                if (fecGrp->at(j)->getFecInv() == g->getFecInv()) {
+                  CirGateV temp(fecGrp->at(j), 0);
+                  out[u].gate()->setFanin0(temp);
+                }
+                else {
+                  CirGateV temp(fecGrp->at(j), 1);
+                  out[u].gate()->setFanin1(temp);
+                }
+              }
+              else {
+                if (fecGrp->at(j)->getFecInv() == g->getFecInv()) {
+                  CirGateV temp(fecGrp->at(j), 1);
+                  out[u].gate()->setFanin0(temp);
+                }
+                else {
+                  CirGateV temp(fecGrp->at(j), 0);
+                  out[j].gate()->setFanin1(temp);
+                }
+              }
+            }
+            if (fecGrp->at(j)->getFecInv() == g->getFecInv()){
+              fecGrp->at(j)->addFanout(out[u]);
+            }
+            else {
+              CirGateV a(out[u].gate(), !out[u].isInv());
+              fecGrp->at(j)->addFanout(a);
+            }
+          }
+          // fanin
+          for (vector<CirGateV>::iterator a = g->fanin0_gate()->output().begin(); a != g->fanin0_gate()->output().end();) {
+            if (a->gate() == g){
+              a = g->fanin0_gate()->output().erase(a);
+              break;
+            }
+            else
+              ++a;
+          }
+          for (vector<CirGateV>::iterator a = g->fanin1_gate()->output().begin(); a != g->fanin1_gate()->output().end();) {
+            if (a->gate() == g){
+              a = g->fanin1_gate()->output().erase(a);
+              break;
+            }
+            else
+              ++a;
+          }
+          if (fecGrp->at(j)->getFecInv() == g->getFecInv())
+            cout << "Fraig: " << fecGrp->at(j)->getVar() << " merging " << fecGrp->at(k)->getVar() << "..." << endl;
+          else
+            cout << "Fraig: " << fecGrp->at(j)->getVar() << " merging !" << fecGrp->at(k)->getVar() << "..." << endl;
+          _vAllGates[g->getVar()] = 0;
+          _nAIG -= 1;
+          fecGrp->erase(fecGrp->begin()+k);
+          --s; --k;
+          cout << "Updating by UNSAT... Total #FEC Group = " << _fecGrpList.size() << endl;
+        }
+      }
+    }
+  }
+  _fecGrpList.clear();
+  for (size_t i = 0; i < _vDfsList.size(); ++i) {
+    if (_vDfsList[i]->getFec())  _vDfsList[i]->setFec(0);
+  }
+  buildDfsList();
+  optimize();
+  strash();
+  buildDfsList();
